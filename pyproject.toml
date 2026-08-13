@@ -1,8 +1,8 @@
 [project]
 name = "call-me-maybe"
 version = "0.0.1"
-description = "Integer AI in a project"
-requires-python = ">=3.11"
+description = "Constrained-decoding function calling with a small local LLM"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "numpy>=2.4.6",
     "pydantic>=2.13.4",
@@ -11,3 +11,21 @@ dependencies = [
 
 [tool.uv.sources]
 llm_sdk = { path = "./llm_sdk" }
+
+[dependency-groups]
+dev = [
+    "flake8>=7.3.0",
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+]
+
+[tool.mypy]
+exclude = "(^|/)(\\.venv|llm_sdk|data|tests|build|dist)(/|$)"
+
+[[tool.mypy.overrides]]
+module = "llm_sdk.*"
+follow_imports = "skip"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

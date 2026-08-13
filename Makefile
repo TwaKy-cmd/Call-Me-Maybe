@@ -7,7 +7,7 @@ run:
 	uv run python -m src
 
 debug:
-	python -m pdb -m src
+	uv run python -m pdb -m src
 
 clean:
 	rm -rf .mypy_cache .pytest_cache .ruff_cache
@@ -21,3 +21,6 @@ lint:
 lint-strict:
 	uv run flake8 .
 	uv run mypy . --strict
+
+test:
+	uv run pytest

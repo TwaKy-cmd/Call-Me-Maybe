@@ -59,7 +59,13 @@ def test_load_json_list_valid_file(tmp_path) -> None:
 
 def test_write_results_creates_parent_directories(tmp_path) -> None:
     output_path = tmp_path / "nested" / "output" / "results.json"
-    results = [FunctionCall(prompt="Add 2 and 3", name="fn_add_numbers", parameters={"a": 2.0, "b": 3.0})]
+    results = [
+        FunctionCall(
+            prompt="Add 2 and 3",
+            name="fn_add_numbers",
+            parameters={"a": 2.0, "b": 3.0},
+        )
+    ]
 
     write_results(str(output_path), results)
 

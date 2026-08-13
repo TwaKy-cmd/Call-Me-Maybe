@@ -22,7 +22,7 @@ def grammar() -> Grammar:
             returns=Parameter(type="string"),
         ),
     ]
-    return Grammar(functions)
+    return Grammar(functions=functions)
 
 
 def test_get_function_names(grammar: Grammar) -> None:

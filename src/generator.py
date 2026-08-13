@@ -5,6 +5,8 @@ delegated to :mod:`src.constraint_engine`; this module only decides what
 to ask the model at each step and assembles the final object.
 """
 
+import json
+
 from src.constraint_engine import ChoiceDecoder, DecodingError, LLM, ValueDecoder
 from src.grammar import Grammar
 from src.models import Function, FunctionCall
@@ -31,9 +33,12 @@ class Generator:
         self._llm = llm
         self._choice_decoder = ChoiceDecoder(llm)
         self._value_decoder = ValueDecoder(llm, vocabulary)
-        self._comma_id = vocabulary.get_id(",")
-        self._brace_id = vocabulary.get_id("}")
         self._quote_id = vocabulary.get_id('"')
+        # Anything starting with a comma or a closing brace means "this
+        # value is finished" -- see Vocabulary.ids_starting_with.
+        self._number_stop_ids = vocabulary.ids_starting_with(",") | vocabulary.ids_starting_with(
+            "}"
+        )
 
     def generate(self, user_prompt: str) -> FunctionCall:
         """Translate one natural-language prompt into a structured function call.
@@ -66,7 +71,7 @@ class Generator:
 
     def _value_stop_ids(self) -> frozenset[int]:
         """Ids of whatever can immediately follow a parameter value (`,` or `}`)."""
-        return frozenset(i for i in (self._comma_id, self._brace_id) if i is not None)
+        return self._number_stop_ids
 
     # -- function selection --------------------------------------------
 
@@ -102,28 +107,51 @@ class Generator:
     def _choose_parameters(
         self, user_prompt: str, function_name: str
     ) -> dict[str, int | float | str | bool]:
+        """Fill the argument object one parameter at a time.
+
+        The parameters already decoded are re-injected into the prompt as
+        a partial JSON object, so each new value is conditioned on them.
+        Without that, every parameter would be extracted from the very
+        same prompt and the model would happily repeat the first value it
+        found (``{"a": 2, "b": 2}`` for "the sum of 2 and 3").
+        """
         function = self._grammar.get_function_by_name(function_name)
+        header = self._build_arguments_header(user_prompt, function)
         parameters: dict[str, int | float | str | bool] = {}
+        filled: list[str] = []
+
         for param_name, param in function.parameters.items():
-            parameters[param_name] = self._choose_value(
-                user_prompt, function, param_name, param.type
-            )
+            prefix = header + self._json_prefix(filled, param_name)
+            value = self._choose_value(prefix, function, param_name, param.type)
+            parameters[param_name] = value
+            filled.append(f"{json.dumps(param_name)}: {json.dumps(value)}")
+
         return parameters
 
+    @staticmethod
+    def _json_prefix(filled: list[str], param_name: str) -> str:
+        """Render the partial JSON object up to the value about to be decoded."""
+        return "{" + "".join(f"{fragment}, " for fragment in filled) + f'"{param_name}": '
+
     def _choose_value(
-        self, user_prompt: str, function: Function, param_name: str, param_type: str
+        self, prefix: str, function: Function, param_name: str, param_type: str
     ) -> int | float | str | bool:
-        prompt = self._build_value_prompt(user_prompt, function, param_name, param_type)
-        prompt_ids = self._encode(prompt)
+        """Decode one argument value, continuing the partial JSON in `prefix`."""
         stop_ids = self._value_stop_ids()
 
         if param_type == "integer":
+            prompt_ids = self._encode(prefix)
             return self._value_decoder.generate_number(prompt_ids, integer=True, stop_ids=stop_ids)
         if param_type == "number":
+            prompt_ids = self._encode(prefix)
             return self._value_decoder.generate_number(prompt_ids, integer=False, stop_ids=stop_ids)
         if param_type == "string":
+            # The opening quote is written for the model, so that closing
+            # it is the natural continuation and can serve as stop signal.
+            prompt_ids = self._encode(prefix + '"')
             return self._value_decoder.generate_string(prompt_ids)
         if param_type == "boolean":
+            prompt_ids = self._encode(prefix)
             choice = self._choice_decoder.choose(prompt_ids, ["true", "false"])
             return choice == "true"
 
@@ -133,21 +161,25 @@ class Generator:
         )
 
     @staticmethod
-    def _build_value_prompt(
-        user_prompt: str, function: Function, param_name: str, param_type: str
-    ) -> str:
+    def _build_arguments_header(user_prompt: str, function: Function) -> str:
+        """Everything that precedes the partial JSON object in a value prompt."""
+        signature = ", ".join(f"{n} ({p.type})" for n, p in function.parameters.items())
         lines = [
-            "You extract a single argument value from a user request.",
-            "Answer with only the raw value: no quotes, no punctuation, no explanation.",
+            "You fill in the arguments of a function call as a JSON object.",
+            "Copy the values from the user request exactly, then close the JSON.",
             "",
-            'Example: request "Add 40 and 2", function fn_add_numbers, '
-            "parameter a (number) -> 40",
-            'Example: request "Say hi to Paul", function fn_greet, '
-            "parameter name (string) -> Paul",
+            'Example: request "Add 40 and 2", function fn_add_numbers(a, b)',
+            'JSON arguments: {"a": 40, "b": 2}',
+            'Example: request "Say hi to Paul", function fn_greet(name)',
+            'JSON arguments: {"name": "Paul"}',
+            'Example: request "Replace every space with a dash in \'a b c\'", '
+            "function fn_replace(source, old, new)",
+            'JSON arguments: {"source": "a b c", "old": " ", "new": "-"}',
             "",
             f'User request: "{user_prompt}"',
             f"Function: {function.name} - {function.description}",
-            f"Parameter: {param_name} (type: {param_type})",
-            f"{param_name} =",
+            f"Arguments: {signature}",
+            "",
+            "JSON arguments: ",
         ]
         return "\n".join(lines)

@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: could not load the model vocabulary: {e}", file=sys.stderr)
         return 1
 
-    grammar = Grammar(functions)
+    grammar = Grammar(functions=functions)
     generator = Generator(vocabulary, grammar, llm)
 
     results: list[FunctionCall] = []

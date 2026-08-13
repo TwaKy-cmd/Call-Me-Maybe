@@ -7,10 +7,21 @@ dependencies = [
     "numpy>=2.4.6",
     "pydantic>=2.13.4",
     "llm_sdk",
+    "accelerate>=1.14.0",
+    "torch==2.8.0",
 ]
 
 [tool.uv.sources]
 llm_sdk = { path = "./llm_sdk" }
+# The default torch wheels (cu13) only ship kernels for sm_75+, which excludes
+# Pascal GPUs (GTX 10xx, sm_61). The cu126 wheels still ship sm_60 cubins, which
+# run on sm_61, plus PTX for newer archs.
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [dependency-groups]
 dev = [

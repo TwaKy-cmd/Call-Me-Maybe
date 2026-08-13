@@ -1,18 +1,20 @@
 """Read-only view over the available functions (functions_definition.json)."""
 
+from pydantic import BaseModel
+
 from src.models import Function
 
 
-class Grammar:
-    """Exposes lookups over a set of callable :class:`Function` definitions."""
+class Grammar(BaseModel):
+    """Exposes lookups over a set of callable :class:`Function` definitions.
 
-    def __init__(self, functions: list[Function]) -> None:
-        """Store the available functions.
+    Attributes:
+        functions: The parsed content of functions_definition.json. Pydantic
+            re-validates every element here, so a `Grammar` can never be
+            built around a malformed function definition.
+    """
 
-        Args:
-            functions: The parsed content of functions_definition.json.
-        """
-        self.functions = functions
+    functions: list[Function]
 
     def get_function_names(self) -> list[str]:
         """Return every declared function name, in definition order."""

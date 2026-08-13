@@ -1,4 +1,4 @@
-.PHONY: install run debug clean lint lint-strict
+.PHONY: install run debug clean fclean re lint lint-strict test
 
 install:
 	uv sync
@@ -11,8 +11,15 @@ debug:
 
 clean:
 	rm -rf .mypy_cache .pytest_cache .ruff_cache
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
+	find . -not -path "./.venv/*" -type d -name "__pycache__" -prune -exec rm -rf {} +
+	find . -not -path "./.venv/*" -type f -name "*.pyc" -delete
+
+# clean + everything that `make install` and `make run` can regenerate.
+fclean: clean
+	rm -rf .venv
+	rm -rf data/output
+
+re: fclean install
 
 lint:
 	uv run flake8 .

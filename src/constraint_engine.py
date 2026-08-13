@@ -50,17 +50,28 @@ class DecodingError(Exception):
     """Raised when constrained decoding cannot produce any valid token."""
 
 
-def _mask_logits(logits: np.ndarray, allowed_ids: Iterable[int]) -> np.ndarray:
-    """Return a copy of `logits` with every id outside `allowed_ids` set to -inf."""
+def _as_id_array(ids: Iterable[int] | np.ndarray) -> np.ndarray:
+    """Normalize a set of candidate token ids into an int64 array."""
+    if isinstance(ids, np.ndarray):
+        return ids
+    return np.fromiter(ids, dtype=np.int64)
+
+
+def _mask_logits(logits: np.ndarray, allowed_ids: Iterable[int] | np.ndarray) -> np.ndarray:
+    """Return a copy of `logits` with every id outside `allowed_ids` set to -inf.
+
+    The candidate set can hold most of a ~150k-token vocabulary (any token
+    is legal inside a JSON string), so the mask is applied with a single
+    vectorized scatter rather than a Python-level loop.
+    """
     masked = np.full_like(logits, -np.inf)
-    size = masked.shape[0]
-    for token_id in allowed_ids:
-        if 0 <= token_id < size:
-            masked[token_id] = logits[token_id]
+    ids = _as_id_array(allowed_ids)
+    ids = ids[(ids >= 0) & (ids < masked.shape[0])]
+    masked[ids] = logits[ids]
     return masked
 
 
-def _argmax_among(logits: np.ndarray, ids: Iterable[int]) -> int:
+def _argmax_among(logits: np.ndarray, ids: Iterable[int] | np.ndarray) -> int:
     """Return the id (from `ids`) with the highest logit.
 
     Raises:
@@ -222,7 +233,15 @@ class ValueDecoder:
         closing quote -- comma or brace characters are ordinary, legal
         string content (e.g. "Hello, world"), so they cannot double as a
         stop signal the way they do for numbers. The closing quote is
-        therefore the only token competed against "keep going".
+        therefore the only token competed against "keep going", which is
+        why the caller must condition this on a prompt whose last written
+        character is the string's *opening* quote: closing it is then the
+        model's own natural continuation.
+
+        Tokens are accumulated as raw bytes rather than text, because a
+        byte-level BPE token can carry a fragment of a multi-byte UTF-8
+        character; decoding only once the value is complete keeps
+        multi-byte characters intact.
 
         Args:
             prompt_ids: Token ids of the prompt the value is conditioned on.
@@ -232,18 +251,16 @@ class ValueDecoder:
             The generated string content (without surrounding quotes).
         """
         allowed_ids = self._vocab.string_content_ids
-        quote_id = self._vocab.get_id('"')
-        stop_competitors = {quote_id} if quote_id is not None else set()
+        competitor_ids = _as_id_array(allowed_ids | self._vocab.ids_starting_with('"'))
 
         running_ids = list(prompt_ids)
-        text = ""
+        content = bytearray()
         for _ in range(max_tokens):
-            competitors = set(allowed_ids) | stop_competitors
             logits = np.asarray(self._llm.get_logits_from_input_ids(running_ids), dtype=np.float64)
-            best_id = _argmax_among(logits, competitors)
+            best_id = _argmax_among(logits, competitor_ids)
             if best_id not in allowed_ids:
                 break
             running_ids.append(best_id)
-            text += self._vocab.get_text(best_id)
+            content += self._vocab.get_bytes(best_id)
 
-        return text
+        return content.decode("utf-8", errors="replace")

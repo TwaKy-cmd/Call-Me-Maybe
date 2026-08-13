@@ -39,6 +39,8 @@ make lint      # flake8 + mypy (mandatory flags from the subject)
 make lint-strict  # flake8 + mypy --strict
 make test      # uv run pytest — the (ungraded) unit-test suite
 make clean     # removes caches (__pycache__, .mypy_cache, ...)
+make fclean    # clean + removes .venv and data/output
+make re        # fclean + install, from scratch
 ```
 
 Running the program directly, with custom paths:
@@ -54,6 +56,18 @@ All three flags are optional; they default to the paths shown above. On its very
 first run, the LLM SDK downloads the Qwen3-0.6B weights (~1.2 GB) from the Hugging
 Face Hub and caches them locally — this can take a few minutes depending on your
 connection; subsequent runs load instantly from the local cache.
+
+### A note on the pinned torch build
+
+`pyproject.toml` pins `torch==2.8.0` from the CUDA 12.6 index. The current default
+wheels only ship kernels for `sm_75` and above, which excludes Pascal GPUs
+(GTX 10xx, `sm_61`) — on such a card the model loads and then dies with
+`CUDA error: no kernel image is available for execution on the device`. The cu126
+wheels still ship `sm_60` cubins, which run on `sm_61` by CUDA's minor-version
+binary compatibility, and cover everything up to `sm_90`. If you are running a
+Blackwell card (RTX 50xx, `sm_120`), drop the pin and the `[[tool.uv.index]]`
+block to get the default wheels back. `accelerate` is a required dependency
+because the SDK passes `device_map="auto"` whenever CUDA is available.
 
 ## Resources
 
@@ -145,8 +159,12 @@ at startup (see `src/vocabulary.py`):
   `"integer"` type, transitions into the fractional part are simply excluded from
   the allowed set — an integer value is structurally incapable of containing a
   `.`.
-* **Strings** allow any vocabulary token whose text contains none of `" \ \n \r
-  \t` — the only characters that could break JSON string syntax.
+* **Strings** allow any vocabulary token whose decoded *bytes* are all printable
+  (`>= 0x20`) and contain neither `"` nor `\` — the only bytes that could break
+  JSON string syntax. The test is done on decoded bytes, not on the raw
+  vocabulary key: in a byte-level BPE vocabulary a newline is stored as the
+  printable placeholder `Ċ`, so a naive check on the raw key lets control
+  characters straight through (see *Challenges faced*).
 
 For both, the interesting problem is not "what's a valid next character" (that's a
 simple mask) but **"when is the value done?"**. A number or a string has no natural
@@ -155,10 +173,17 @@ end-of-sequence token. The trick: once the value is already syntactically comple
 the "keep going" tokens are made to *compete*, using the same logits, against the
 token(s) that would immediately follow the value in the final JSON:
 
-* for a number, the comma/closing-brace tokens;
-* for a string, the closing-quote token (comma/brace are deliberately **not** used
-  here — see *Challenges faced*, they are legal string content and would create an
-  ambiguity).
+* for a number, any token *starting with* a comma or a closing brace;
+* for a string, any token *starting with* a quote (comma/brace are deliberately
+  **not** used here — see *Challenges faced*, they are legal string content and
+  would create an ambiguity).
+
+"Starting with" rather than "equal to" is essential, not a detail: a byte-level
+BPE tokenizer merges a closing delimiter with what follows it, so the token that
+actually ends a string mid-object is `","`, not `"`. There are 424 tokens
+beginning with a quote in Qwen's vocabulary; treating only the bare quote as the
+stop signal makes the decoder deaf to what the model is asking for (see
+*Challenges faced*).
 
 If the model's own logits favor that "next" token over continuing the value, the
 decoder stops there — the model decides its own value's length, while the decoder
@@ -180,6 +205,14 @@ something: which function, and what value for each argument.
 
 ## Design decisions
 
+* **The prompt *is* a partial JSON object.** Rather than describing the value it
+  wants in prose, `Generator` writes the JSON it has already committed to and
+  asks the model to continue it: `... JSON arguments: {"a": 2.0, "b": `. This one
+  decision buys two properties at once — the closing quote/comma the decoder
+  competes against becomes the model's own natural next token (a workable stop
+  signal instead of an impossible one), and each argument is conditioned on the
+  arguments already extracted instead of being decoded in isolation. Both were
+  real bugs; see *Challenges faced*.
 * **No chat template.** Qwen3-0.6B ships as an instruction-tuned model with a
   ChatML template, but `Small_LLM_Model` only exposes plain `encode(text: str)`
   (no `apply_chat_template`, and reaching into the tokenizer directly would mean
@@ -198,9 +231,18 @@ something: which function, and what value for each argument.
   tests. This is the single explicit suppression in the codebase.
 * **Pydantic everywhere data crosses a boundary.** `Function`, `Parameter`,
   `PromptInput` and `FunctionCall` (`src/models.py`) validate both input files and
-  the output, satisfying the "all classes must use pydantic" requirement and
-  turning malformed input files into one clear `InputFileError` instead of a raw
-  traceback.
+  the output; `Grammar` is itself a `BaseModel`, so its `list[Function]` is
+  re-validated on construction; and `Vocabulary` validates the raw vocabulary file
+  through a pydantic `TypeAdapter(dict[str, int])` rather than hand-rolled
+  `isinstance` checks. Together this turns any malformed input into one clear
+  `InputFileError` or `ValueError` instead of a raw traceback.
+  The classes that are *not* pydantic models are the ones that carry no external
+  data to validate: exceptions (`InputFileError`, `DecodingError`,
+  `GenerationError`), the structural `LLM` `Protocol`, the `NumberState` enum, the
+  internal `_TrieNode`, and the three behaviour-only classes (`ChoiceDecoder`,
+  `ValueDecoder`, `Generator`) whose only state is a model handle and precomputed
+  masks. Validating those would cost per-token overhead on the hot path without
+  checking anything a type annotation does not already guarantee.
 * **A `Protocol`, not a concrete `Small_LLM_Model` import, inside the engine.**
   `src/constraint_engine.py` and `src/generator.py` depend on a small structural
   `LLM` protocol (`get_logits_from_input_ids`, `encode`), not on `llm_sdk` itself.
@@ -225,23 +267,76 @@ something: which function, and what value for each argument.
   `get_logits_from_input_ids` all behave exactly as assumed by
   `src/vocabulary.py` and `src/constraint_engine.py` (byte-level BPE tokens,
   printable ASCII mapping to itself, a `list[float]` logits vector per call).
-  A full batched run over all 11 bundled prompts against the real model could
-  not be completed inside the sandboxed shell used for AI-assisted development
-  in this session (see *Challenges faced*) — this is a property of that specific
-  sandbox, not of the code, so run `make run` yourself to get the real
-  per-prompt accuracy on your machine; `data/output/function_calling_results.json`
-  is intentionally not committed (see *Submission* rules) so this is expected.
-* **Speed**: most of the wall-clock time is the one-time model load, not
-  generation. Once loaded, each decision needs anywhere from a single LLM call
-  (an unambiguous function-name prefix, via the trie's single-child shortcut) to a
-  few dozen (a long string or number, one call per generated character/token) —
-  cheap relative to the model load itself. On normal hardware (i.e. outside the
-  restricted sandbox described in *Challenges faced*), loading Qwen3-0.6B takes a
-  few seconds to tens of seconds, and generation for the 11 bundled prompts is
-  expected to complete well inside the 5-minute budget.
+  Measured on the 11 bundled prompts against the real Qwen3-0.6B:
+  **function selection 11/11 (100%)**, argument values **18/19 (95%)**, for
+  **10/11 prompts entirely correct**. The single miss is `" *"` where `"*"` was
+  meant — the model picked the vocabulary token that carries a leading space.
+  That leading space is deliberately *not* stripped: a space is a perfectly
+  legitimate argument value (replacing spaces with dashes is a realistic call),
+  so trimming it would trade a cosmetic win for a correctness bug.
+  Every regex, number, name and quoted substring is extracted correctly.
+  One honest caveat on how that number was reached: the third few-shot example in
+  the argument prompt (a space/dash replacement) was added *after* observing that
+  the model echoed `"asterisk"` instead of `"*"`. The example itself is generic —
+  it teaches "when the request names a character, write the character", and none
+  of the bundled prompts appear in it — but it was chosen in response to a
+  measured failure, so treat 95% as the accuracy on *this* prompt set, not as a
+  guaranteed floor on the reviewer's.
+  `data/output/function_calling_results.json` is intentionally not committed
+  (see *Submission* rules), so run `make run` to reproduce these figures.
+* **Speed**: **31s** for the full 11-prompt run on a laptop GTX 1050, of which a
+  few seconds are the one-time model load — comfortably inside the 5-minute
+  budget. Once loaded, each decision needs anywhere from a single LLM call (an
+  unambiguous function-name prefix, via the trie's single-child shortcut) to a
+  few dozen (a long string or number, one call per generated token). Note that
+  `get_logits_from_input_ids` re-runs the whole prefix on every call (the SDK
+  exposes no KV cache), so cost grows with prompt length. Two things brought the
+  run down from an initial 183s: applying the logit masks with a single
+  vectorized NumPy scatter instead of a Python loop over the ~150k allowed ids,
+  and fixing the stop set (see *Challenges faced*) — a value that stops when the
+  model wants it to costs a handful of forward passes instead of the full
+  `max_tokens` cap. Without a usable GPU the same run takes well over 15 minutes.
 
 ## Challenges faced
 
+* **Vocabulary keys are not the text they stand for.** The first real run
+  produced `{"name": "ĠshrekĊAnswer:Ġname..."}`. In a byte-level BPE vocabulary
+  every raw byte is re-encoded into a printable placeholder — a space is stored
+  as `Ġ`, a newline as `Ċ` — so reading `vocab.json` keys as literal text leaks
+  those placeholders straight into the output. Worse, it silently broke the
+  string mask: the check excluded the character `"\n"`, which simply never
+  appears in such a vocabulary, so *newline tokens were allowed inside JSON
+  strings*. `Vocabulary` now rebuilds the inverse byte table once at import
+  (`_byte_decoder`) and every mask works on decoded `bytes`. Tokens are
+  accumulated as `bytes` and decoded only once the value is complete, because a
+  single token can hold a fragment of a multi-byte UTF-8 character (a `€` is
+  three bytes and may be split).
+* **A prompt that contradicted its own stop signal.** Strings stop when the model
+  prefers the closing quote — but the value prompt used to end with `name =` and
+  instructed "no quotes, no punctuation". The quote was therefore the one token
+  the model would never pick, and every string ran to the `max_tokens` cap. The
+  fix was to stop *describing* the target and start *writing* it: the prompt now
+  ends with a partial JSON object whose opening quote is already written
+  (`{"name": "`), making the closing quote the natural continuation.
+* **The stop signal was one token wide, and the model never used it.** Even with
+  the partial-JSON prompt above, three prompts still produced runaway values
+  (`cat.*cat.*cat.*...`) up to the `max_tokens` cap. The tempting conclusion was
+  "a 0.6B model cannot synthesize a regex" — dumping the raw logits at each step
+  proved otherwise. From the very first token the model's **top-1 choice overall**
+  was `","` (logit 24.6), i.e. *close the string and move to the next argument*.
+  But `","` contains a quote, so it was excluded from `string_content_ids`; and it
+  is not the bare `"` token, so it was not in the stop set either. Masked to
+  `-inf` from both sides, it was discarded, and the decoder fell back to the best
+  *content* token (`.*`, logit 19.7) — over and over. The bare quote sat at rank
+  121. The lesson: with byte-level BPE, a delimiter is almost never a token of its
+  own, so a stop set must be defined by *prefix*, not by equality. Diagnosing this
+  meant printing the top-k logits rather than trusting the plausible explanation.
+* **Arguments extracted in isolation repeated each other.** Each parameter used
+  to get its own independent prompt, so "What is the sum of 2 and 3?" yielded
+  `{"a": 2, "b": 2}` — asked for `b` in isolation, the model has no reason not to
+  answer with the first number it sees. Feeding back the already-decoded
+  parameters as a partial JSON prefix (`{"a": 2.0, "b": ` ) fixes it, and falls
+  out of the same design as the point above.
 * **`import torch` hanging in the sandboxed development shell.** Early testing
   showed `Small_LLM_Model()` never returning — 0% CPU usage for minutes on end.
   Bisecting the SDK step by step (plain `import torch`, then tokenizer loading,

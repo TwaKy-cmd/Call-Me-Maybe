@@ -24,14 +24,14 @@ def grammar() -> Grammar:
             returns=Parameter(type="string"),
         ),
     ]
-    return Grammar(functions)
+    return Grammar(functions=functions)
 
 
 def test_generate_picks_function_and_number_parameters(vocabulary, grammar: Grammar) -> None:
     stop_ids = {vocabulary.get_id(","), vocabulary.get_id("}"), vocabulary.get_id('"')}
     llm = OracleLLM(
         vocabulary,
-        targets={"Function name:": "add", "a =": "4", "b =": "2"},
+        targets={"Function name:": "add", '"a": ': "4", '"b": ': "2"},
         stop_ids=stop_ids,
     )
     generator = Generator(vocabulary, grammar, llm)
@@ -47,7 +47,7 @@ def test_generate_picks_function_and_string_parameter(vocabulary, grammar: Gramm
     stop_ids = {vocabulary.get_id(","), vocabulary.get_id("}"), vocabulary.get_id('"')}
     llm = OracleLLM(
         vocabulary,
-        targets={"Function name:": "greet", "name =": "bob"},
+        targets={"Function name:": "greet", '"name": "': "bob"},
         stop_ids=stop_ids,
     )
     generator = Generator(vocabulary, grammar, llm)
@@ -66,6 +66,6 @@ def test_generate_raises_when_no_functions_are_declared(vocabulary) -> None:
         def encode(self, text):
             raise AssertionError
 
-    generator = Generator(vocabulary, Grammar([]), UnusedLLM())
+    generator = Generator(vocabulary, Grammar(functions=[]), UnusedLLM())
     with pytest.raises(GenerationError):
         generator.generate("anything")

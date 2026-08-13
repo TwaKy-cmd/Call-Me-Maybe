@@ -33,6 +33,49 @@ def test_get_text_and_get_id_roundtrip(vocabulary: Vocabulary) -> None:
     assert vocabulary.get_id("does-not-exist-as-a-token") is None
 
 
+@pytest.fixture
+def byte_level_vocabulary(tmp_path) -> Vocabulary:
+    """A vocabulary written in the byte-level BPE alphabet, like Qwen's."""
+    path = tmp_path / "vocab.json"
+    path.write_text(
+        json.dumps(
+            {
+                "Ġshrek": 0,  # " shrek"
+                "Ċ": 1,  # "\n"
+                "hello": 2,
+                '"': 3,
+                "Ġ": 4,  # " "
+                "âĤ¬": 5,  # "€", split across three raw bytes
+            }
+        )
+    )
+    return Vocabulary(str(path))
+
+
+def test_byte_level_tokens_decode_to_real_text(byte_level_vocabulary: Vocabulary) -> None:
+    assert byte_level_vocabulary.get_text(0) == " shrek"
+    assert byte_level_vocabulary.get_text(1) == "\n"
+    assert byte_level_vocabulary.get_id(" shrek") == 0
+    assert byte_level_vocabulary.get_id("\n") == 1
+
+
+def test_byte_level_multibyte_character_survives_concatenation(
+    byte_level_vocabulary: Vocabulary,
+) -> None:
+    joined = b"".join(byte_level_vocabulary.get_bytes(i) for i in (2, 5))
+    assert joined.decode("utf-8") == "hello€"
+
+
+def test_byte_level_newline_is_not_valid_string_content(
+    byte_level_vocabulary: Vocabulary,
+) -> None:
+    content_ids = byte_level_vocabulary.string_content_ids
+    assert 1 not in content_ids  # "\n" is a control byte
+    assert 3 not in content_ids  # '"' would close the string
+    assert 0 in content_ids
+    assert 4 in content_ids
+
+
 def test_string_content_ids_excludes_forbidden_characters(vocabulary: Vocabulary) -> None:
     quote_id = vocabulary.get_id('"')
     letter_id = vocabulary.get_id("a")

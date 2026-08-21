@@ -12,7 +12,10 @@ def grammar() -> Grammar:
         Function(
             name="fn_add",
             description="Add two numbers.",
-            parameters={"a": Parameter(type="number"), "b": Parameter(type="number")},
+            parameters={
+                "a": Parameter(type="number"),
+                "b": Parameter(type="number"),
+            },
             returns=Parameter(type="number"),
         ),
         Function(

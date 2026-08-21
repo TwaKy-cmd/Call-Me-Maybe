@@ -57,8 +57,10 @@ def _as_id_array(ids: Iterable[int] | np.ndarray) -> np.ndarray:
     return np.fromiter(ids, dtype=np.int64)
 
 
-def _mask_logits(logits: np.ndarray, allowed_ids: Iterable[int] | np.ndarray) -> np.ndarray:
-    """Return a copy of `logits` with every id outside `allowed_ids` set to -inf.
+def _mask_logits(
+    logits: np.ndarray, allowed_ids: Iterable[int] | np.ndarray
+) -> np.ndarray:
+    """Return a copy of `logits` with ids outside `allowed_ids` set to -inf.
 
     The candidate set can hold most of a ~150k-token vocabulary (any token
     is legal inside a JSON string), so the mask is applied with a single
@@ -80,7 +82,10 @@ def _argmax_among(logits: np.ndarray, ids: Iterable[int] | np.ndarray) -> int:
     masked = _mask_logits(logits, ids)
     best_id = int(np.argmax(masked))
     if not math.isfinite(masked[best_id]):
-        raise DecodingError("No candidate token is representable by this model's vocabulary")
+        raise DecodingError(
+            "No candidate token is representable by this model's "
+            "vocabulary"
+        )
     return best_id
 
 
@@ -144,14 +149,20 @@ class ChoiceDecoder:
                 return node.candidate
 
             if node.candidate is None and len(node.children) == 1:
-                # Only one continuation exists: no decision to make, no LLM call needed.
+                # Only one continuation exists: no decision to make,
+                # no LLM call needed.
                 (only_id, only_child),  = node.children.items()
                 running_ids.append(only_id)
                 node = only_child
                 continue
 
-            logits = np.asarray(self._llm.get_logits_from_input_ids(running_ids), dtype=np.float64)
-            competitors = set(node.children) | (stop_ids if node.candidate is not None else set())
+            logits = np.asarray(
+                self._llm.get_logits_from_input_ids(running_ids),
+                dtype=np.float64,
+            )
+            competitors = set(node.children) | (
+                stop_ids if node.candidate is not None else set()
+            )
             best_id = _argmax_among(logits, competitors)
 
             if node.candidate is not None and best_id not in node.children:
@@ -200,7 +211,9 @@ class ValueDecoder:
                 allowed_ids = frozenset(
                     token_id
                     for token_id in allowed_ids
-                    if end_states[token_id] not in (NumberState.AFTER_DOT, NumberState.FRAC_DIGITS)
+                    if end_states[token_id] not in (
+                        NumberState.AFTER_DOT, NumberState.FRAC_DIGITS
+                    )
                 )
 
             accepting = Vocabulary.is_accepting_number_state(state)
@@ -208,7 +221,10 @@ class ValueDecoder:
             if not competitors:
                 break
 
-            logits = np.asarray(self._llm.get_logits_from_input_ids(running_ids), dtype=np.float64)
+            logits = np.asarray(
+                self._llm.get_logits_from_input_ids(running_ids),
+                dtype=np.float64,
+            )
             best_id = _argmax_among(logits, competitors)
             if best_id not in allowed_ids:
                 break
@@ -218,7 +234,9 @@ class ValueDecoder:
             state = end_states[best_id]
 
         if not text:
-            raise DecodingError("Constrained number generation produced no digits")
+            raise DecodingError(
+                "Constrained number generation produced no digits"
+            )
         return int(text) if integer else float(text)
 
     def generate_string(
@@ -251,12 +269,17 @@ class ValueDecoder:
             The generated string content (without surrounding quotes).
         """
         allowed_ids = self._vocab.string_content_ids
-        competitor_ids = _as_id_array(allowed_ids | self._vocab.ids_starting_with('"'))
+        competitor_ids = _as_id_array(
+            allowed_ids | self._vocab.ids_starting_with('"')
+        )
 
         running_ids = list(prompt_ids)
         content = bytearray()
         for _ in range(max_tokens):
-            logits = np.asarray(self._llm.get_logits_from_input_ids(running_ids), dtype=np.float64)
+            logits = np.asarray(
+                self._llm.get_logits_from_input_ids(running_ids),
+                dtype=np.float64,
+            )
             best_id = _argmax_among(logits, competitor_ids)
             if best_id not in allowed_ids:
                 break

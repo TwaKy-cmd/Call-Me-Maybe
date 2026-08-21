@@ -18,7 +18,8 @@ class Parameter(BaseModel):
 
 
 class Function(BaseModel):
-    """Describes one callable function as declared in functions_definition.json.
+    """Describes one callable function declared in
+    functions_definition.json.
 
     Attributes:
         name: The function's identifier (e.g. "fn_add_numbers").

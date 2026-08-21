@@ -4,7 +4,12 @@ import json
 
 import pytest
 
-from src.__main__ import InputFileError, load_json_list, parse_args, write_results
+from src.__main__ import (
+    InputFileError,
+    load_json_list,
+    parse_args,
+    write_results,
+)
 from src.models import FunctionCall, PromptInput
 
 
@@ -52,7 +57,9 @@ def test_load_json_list_schema_mismatch_raises(tmp_path) -> None:
 
 def test_load_json_list_valid_file(tmp_path) -> None:
     path = tmp_path / "prompts.json"
-    path.write_text(json.dumps([{"prompt": "Greet shrek"}, {"prompt": "Reverse 'hi'"}]))
+    path.write_text(
+        json.dumps([{"prompt": "Greet shrek"}, {"prompt": "Reverse 'hi'"}])
+    )
     prompts = load_json_list(str(path), PromptInput)
     assert [p.prompt for p in prompts] == ["Greet shrek", "Reverse 'hi'"]
 
@@ -72,7 +79,11 @@ def test_write_results_creates_parent_directories(tmp_path) -> None:
     assert output_path.exists()
     written = json.loads(output_path.read_text())
     assert written == [
-        {"prompt": "Add 2 and 3", "name": "fn_add_numbers", "parameters": {"a": 2.0, "b": 3.0}}
+        {
+            "prompt": "Add 2 and 3",
+            "name": "fn_add_numbers",
+            "parameters": {"a": 2.0, "b": 3.0},
+        }
     ]
 
 

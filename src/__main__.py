@@ -1,7 +1,8 @@
 """CLI entry point: turns natural-language prompts into function calls.
 
 Usage:
-    uv run python -m src [--functions_definition PATH] [--input PATH] [--output PATH]
+    uv run python -m src [--functions_definition PATH] [--input PATH]
+        [--output PATH]
 """
 
 import argparse
@@ -51,18 +52,26 @@ def load_json_list(path: str, model_type: type[ModelT]) -> list[ModelT]:
         raise InputFileError(f"invalid JSON in {path}: {e}") from e
 
     try:
-        return TypeAdapter(list[model_type]).validate_python(data)  # type: ignore[valid-type]
+        adapter = TypeAdapter(list[model_type])  # type: ignore[valid-type]
+        return adapter.validate_python(data)
     except ValidationError as e:
-        raise InputFileError(f"{path} does not match the expected schema: {e}") from e
+        raise InputFileError(
+            f"{path} does not match the expected schema: {e}"
+        ) from e
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments, applying the documented defaults."""
     parser = argparse.ArgumentParser(
         prog="python -m src",
-        description="Translate natural-language prompts into structured function calls.",
+        description=(
+            "Translate natural-language prompts into structured "
+            "function calls."
+        ),
     )
-    parser.add_argument("--functions_definition", default=DEFAULT_FUNCTIONS_DEFINITION)
+    parser.add_argument(
+        "--functions_definition", default=DEFAULT_FUNCTIONS_DEFINITION
+    )
     parser.add_argument("--input", default=DEFAULT_INPUT)
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     return parser.parse_args(argv)
@@ -101,17 +110,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: could not import the LLM SDK: {e}", file=sys.stderr)
         return 1
 
-    print("Loading the language model (this can take a while on first run)...", file=sys.stderr)
+    print(
+        "Loading the language model (this can take a while on first "
+        "run)...",
+        file=sys.stderr,
+    )
     try:
         llm = Small_LLM_Model()
-    except Exception as e:  # noqa: BLE001 - SDK/torch/HF can fail in many ways
-        print(f"Error: could not load the language model: {e}", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001 - SDK/torch/HF can fail
+        print(
+            f"Error: could not load the language model: {e}",
+            file=sys.stderr,
+        )
         return 1
 
     try:
         vocabulary = Vocabulary(llm.get_path_to_vocab_file())
     except (OSError, ValueError) as e:
-        print(f"Error: could not load the model vocabulary: {e}", file=sys.stderr)
+        print(
+            f"Error: could not load the model vocabulary: {e}",
+            file=sys.stderr,
+        )
         return 1
 
     grammar = Grammar(functions=functions)
@@ -122,10 +141,16 @@ def main(argv: list[str] | None = None) -> int:
         try:
             results.append(generator.generate(prompt_input.prompt))
         except (GenerationError, ValueError) as e:
-            print(f"Warning: skipped prompt {prompt_input.prompt!r}: {e}", file=sys.stderr)
+            print(
+                f"Warning: skipped prompt {prompt_input.prompt!r}: {e}",
+                file=sys.stderr,
+            )
 
     write_results(args.output, results)
-    print(f"Wrote {len(results)}/{len(prompts)} function call(s) to {args.output}")
+    print(
+        f"Wrote {len(results)}/{len(prompts)} function call(s) to "
+        f"{args.output}"
+    )
     return 0
 
 

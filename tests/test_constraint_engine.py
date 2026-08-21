@@ -16,31 +16,39 @@ def test_choice_decoder_picks_the_scripted_candidate(vocabulary) -> None:
     assert result == "dog"
 
 
-def test_choice_decoder_single_candidate_needs_no_llm_call(vocabulary) -> None:
+def test_choice_decoder_single_candidate_needs_no_llm_call(
+    vocabulary,
+) -> None:
     class ExplodingLLM:
         def get_logits_from_input_ids(self, input_ids):
-            raise AssertionError("should not be called when there is only one candidate")
+            raise AssertionError("should not be called with one candidate")
 
         def encode(self, text):
-            raise AssertionError("should not be called when there is only one candidate")
+            raise AssertionError("should not be called with one candidate")
 
     decoder = ChoiceDecoder(ExplodingLLM())
     assert decoder.choose([], ["only_option"]) == "only_option"
 
 
-def test_choice_decoder_stops_at_a_shared_prefix_when_stop_wins(vocabulary) -> None:
+def test_choice_decoder_stops_at_a_shared_prefix_when_stop_wins(
+    vocabulary,
+) -> None:
     # "hi" is itself a valid candidate but also a prefix of "hidden".
     quote_id = vocabulary.get_id('"')
     llm = OracleLLM(vocabulary, targets={"pick:": "hi"}, stop_ids={quote_id})
     decoder = ChoiceDecoder(llm)
     prompt_ids = llm.encode("pick:").flatten().tolist()
 
-    result = decoder.choose(prompt_ids, ["hi", "hidden"], stop_ids=frozenset({quote_id}))
+    result = decoder.choose(
+        prompt_ids, ["hi", "hidden"], stop_ids=frozenset({quote_id})
+    )
 
     assert result == "hi"
 
 
-def test_choice_decoder_continues_past_shared_prefix_when_no_stop_signal(vocabulary) -> None:
+def test_choice_decoder_continues_past_shared_prefix_when_no_stop_signal(
+    vocabulary,
+) -> None:
     llm = OracleLLM(vocabulary, targets={"pick:": "hidden"}, stop_ids=set())
     decoder = ChoiceDecoder(llm)
     prompt_ids = llm.encode("pick:").flatten().tolist()
@@ -68,7 +76,9 @@ def test_generate_number_produces_an_integer(vocabulary) -> None:
     decoder = ValueDecoder(llm, vocabulary)
     prompt_ids = llm.encode("a =").flatten().tolist()
 
-    result = decoder.generate_number(prompt_ids, integer=True, stop_ids=frozenset(stop_ids))
+    result = decoder.generate_number(
+        prompt_ids, integer=True, stop_ids=frozenset(stop_ids)
+    )
 
     assert result == 42
     assert isinstance(result, int)
@@ -80,7 +90,9 @@ def test_generate_number_produces_a_float(vocabulary) -> None:
     decoder = ValueDecoder(llm, vocabulary)
     prompt_ids = llm.encode("a =").flatten().tolist()
 
-    result = decoder.generate_number(prompt_ids, integer=False, stop_ids=frozenset(stop_ids))
+    result = decoder.generate_number(
+        prompt_ids, integer=False, stop_ids=frozenset(stop_ids)
+    )
 
     assert result == pytest.approx(4.2)
     assert isinstance(result, float)
@@ -92,7 +104,9 @@ def test_generate_number_handles_negative_values(vocabulary) -> None:
     decoder = ValueDecoder(llm, vocabulary)
     prompt_ids = llm.encode("a =").flatten().tolist()
 
-    result = decoder.generate_number(prompt_ids, integer=True, stop_ids=frozenset(stop_ids))
+    result = decoder.generate_number(
+        prompt_ids, integer=True, stop_ids=frozenset(stop_ids)
+    )
 
     assert result == -7
 
@@ -119,7 +133,9 @@ def test_generate_string_can_produce_an_empty_string(vocabulary) -> None:
     assert result == ""
 
 
-def test_generate_number_raises_when_nothing_is_representable(vocabulary) -> None:
+def test_generate_number_raises_when_nothing_is_representable(
+    vocabulary,
+) -> None:
     class BlankLLM:
         def get_logits_from_input_ids(self, input_ids):
             return [float("-inf")] * (max(vocabulary.text_to_id.values()) + 1)

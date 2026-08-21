@@ -7,7 +7,12 @@ to ask the model at each step and assembles the final object.
 
 import json
 
-from src.constraint_engine import ChoiceDecoder, DecodingError, LLM, ValueDecoder
+from src.constraint_engine import (
+    ChoiceDecoder,
+    DecodingError,
+    LLM,
+    ValueDecoder,
+)
 from src.grammar import Grammar
 from src.models import Function, FunctionCall
 from src.vocabulary import Vocabulary
@@ -18,9 +23,12 @@ class GenerationError(Exception):
 
 
 class Generator:
-    """Generates one :class:`FunctionCall` per user prompt via constrained decoding."""
+    """Generates one :class:`FunctionCall` per prompt via constrained
+    decoding."""
 
-    def __init__(self, vocabulary: Vocabulary, grammar: Grammar, llm: LLM) -> None:
+    def __init__(
+        self, vocabulary: Vocabulary, grammar: Grammar, llm: LLM
+    ) -> None:
         """Wire together the vocabulary, the function schema and the LLM.
 
         Args:
@@ -36,12 +44,13 @@ class Generator:
         self._quote_id = vocabulary.get_id('"')
         # Anything starting with a comma or a closing brace means "this
         # value is finished" -- see Vocabulary.ids_starting_with.
-        self._number_stop_ids = vocabulary.ids_starting_with(",") | vocabulary.ids_starting_with(
-            "}"
-        )
+        self._number_stop_ids = vocabulary.ids_starting_with(
+            ","
+        ) | vocabulary.ids_starting_with("}")
 
     def generate(self, user_prompt: str) -> FunctionCall:
-        """Translate one natural-language prompt into a structured function call.
+        """Translate one natural-language prompt into a structured
+        function call.
 
         Args:
             user_prompt: The natural-language request.
@@ -54,7 +63,9 @@ class Generator:
                 empty function set or an unsupported parameter type.
         """
         if not self._grammar.functions:
-            raise GenerationError("No functions are declared in functions_definition.json")
+            raise GenerationError(
+                "No functions are declared in functions_definition.json"
+            )
 
         try:
             function_name = self._choose_function_name(user_prompt)
@@ -62,7 +73,9 @@ class Generator:
         except DecodingError as e:
             raise GenerationError(str(e)) from e
 
-        return FunctionCall(prompt=user_prompt, name=function_name, parameters=parameters)
+        return FunctionCall(
+            prompt=user_prompt, name=function_name, parameters=parameters
+        )
 
     def _encode(self, text: str) -> list[int]:
         tensor = self._llm.encode(text)
@@ -70,30 +83,45 @@ class Generator:
         return [int(token_id) for token_id in ids]
 
     def _value_stop_ids(self) -> frozenset[int]:
-        """Ids of whatever can immediately follow a parameter value (`,` or `}`)."""
+        """Ids that can immediately follow a parameter value (`,` or `}`)."""
         return self._number_stop_ids
 
     # -- function selection --------------------------------------------
 
     def _choose_function_name(self, user_prompt: str) -> str:
         candidates = self._grammar.get_function_names()
-        prompt = self._build_function_selection_prompt(user_prompt, self._grammar.functions)
+        prompt = self._build_function_selection_prompt(
+            user_prompt, self._grammar.functions
+        )
         prompt_ids = self._encode(prompt)
-        stop_ids = frozenset({self._quote_id}) if self._quote_id is not None else frozenset()
-        return self._choice_decoder.choose(prompt_ids, candidates, stop_ids=stop_ids)
+        stop_ids = (
+            frozenset({self._quote_id})
+            if self._quote_id is not None
+            else frozenset()
+        )
+        return self._choice_decoder.choose(
+            prompt_ids, candidates, stop_ids=stop_ids
+        )
 
     @staticmethod
-    def _build_function_selection_prompt(user_prompt: str, functions: list[Function]) -> str:
+    def _build_function_selection_prompt(
+        user_prompt: str, functions: list[Function]
+    ) -> str:
         lines = [
             "You are a function-calling assistant.",
-            "Pick the single function that best matches the user request below.",
+            "Pick the single function that best matches the user "
+            "request below.",
             "Answer with only the function name, nothing else.",
             "",
             "Available functions:",
         ]
         for function in functions:
-            params = ", ".join(f"{n}: {p.type}" for n, p in function.parameters.items())
-            lines.append(f"- {function.name}({params}): {function.description}")
+            params = ", ".join(
+                f"{n}: {p.type}" for n, p in function.parameters.items()
+            )
+            lines.append(
+                f"- {function.name}({params}): {function.description}"
+            )
         lines += [
             "",
             f'User request: "{user_prompt}"',
@@ -122,7 +150,9 @@ class Generator:
 
         for param_name, param in function.parameters.items():
             prefix = header + self._json_prefix(filled, param_name)
-            value = self._choose_value(prefix, function, param_name, param.type)
+            value = self._choose_value(
+                prefix, function, param_name, param.type
+            )
             parameters[param_name] = value
             filled.append(f"{json.dumps(param_name)}: {json.dumps(value)}")
 
@@ -130,21 +160,33 @@ class Generator:
 
     @staticmethod
     def _json_prefix(filled: list[str], param_name: str) -> str:
-        """Render the partial JSON object up to the value about to be decoded."""
-        return "{" + "".join(f"{fragment}, " for fragment in filled) + f'"{param_name}": '
+        """Render the partial JSON object up to the value to decode."""
+        return (
+            "{"
+            + "".join(f"{fragment}, " for fragment in filled)
+            + f'"{param_name}": '
+        )
 
     def _choose_value(
-        self, prefix: str, function: Function, param_name: str, param_type: str
+        self,
+        prefix: str,
+        function: Function,
+        param_name: str,
+        param_type: str,
     ) -> int | float | str | bool:
-        """Decode one argument value, continuing the partial JSON in `prefix`."""
+        """Decode one value, continuing the partial JSON in `prefix`."""
         stop_ids = self._value_stop_ids()
 
         if param_type == "integer":
             prompt_ids = self._encode(prefix)
-            return self._value_decoder.generate_number(prompt_ids, integer=True, stop_ids=stop_ids)
+            return self._value_decoder.generate_number(
+                prompt_ids, integer=True, stop_ids=stop_ids
+            )
         if param_type == "number":
             prompt_ids = self._encode(prefix)
-            return self._value_decoder.generate_number(prompt_ids, integer=False, stop_ids=stop_ids)
+            return self._value_decoder.generate_number(
+                prompt_ids, integer=False, stop_ids=stop_ids
+            )
         if param_type == "string":
             # The opening quote is written for the model, so that closing
             # it is the natural continuation and can serve as stop signal.
@@ -156,17 +198,23 @@ class Generator:
             return choice == "true"
 
         raise GenerationError(
-            f"Unsupported parameter type '{param_type}' for parameter '{param_name}' "
-            f"of function '{function.name}'"
+            f"Unsupported parameter type '{param_type}' for parameter "
+            f"'{param_name}' of function '{function.name}'"
         )
 
     @staticmethod
-    def _build_arguments_header(user_prompt: str, function: Function) -> str:
-        """Everything that precedes the partial JSON object in a value prompt."""
-        signature = ", ".join(f"{n} ({p.type})" for n, p in function.parameters.items())
+    def _build_arguments_header(
+        user_prompt: str, function: Function
+    ) -> str:
+        """Everything preceding the partial JSON object in a value prompt."""
+        signature = ", ".join(
+            f"{n} ({p.type})" for n, p in function.parameters.items()
+        )
         lines = [
-            "You fill in the arguments of a function call as a JSON object.",
-            "Copy the values from the user request exactly, then close the JSON.",
+            "You fill in the arguments of a function call as a JSON "
+            "object.",
+            "Copy the values from the user request exactly, then close "
+            "the JSON.",
             "",
             'Example: request "Add 40 and 2", function fn_add_numbers(a, b)',
             'JSON arguments: {"a": 40, "b": 2}',

@@ -59,7 +59,12 @@ class OracleLLM:
     implemented in :mod:`src.constraint_engine`.
     """
 
-    def __init__(self, vocabulary: Vocabulary, targets: dict[str, str], stop_ids: Iterable[int]):
+    def __init__(
+        self,
+        vocabulary: Vocabulary,
+        targets: dict[str, str],
+        stop_ids: Iterable[int],
+    ):
         self._vocab = vocabulary
         self._targets = targets
         self._stop_ids = set(stop_ids)
@@ -69,7 +74,9 @@ class OracleLLM:
         return _FakeTensor([self._vocab.text_to_id[char] for char in text])
 
     def get_logits_from_input_ids(self, input_ids: list[int]) -> list[float]:
-        text = "".join(self._vocab.get_text(token_id) for token_id in input_ids)
+        text = "".join(
+            self._vocab.get_text(token_id) for token_id in input_ids
+        )
         logits = [0.0] * self._size
 
         marker, generated = self._active_marker(text)

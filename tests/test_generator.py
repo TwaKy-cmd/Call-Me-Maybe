@@ -14,7 +14,10 @@ def grammar() -> Grammar:
         Function(
             name="add",
             description="Add two numbers together.",
-            parameters={"a": Parameter(type="number"), "b": Parameter(type="number")},
+            parameters={
+                "a": Parameter(type="number"),
+                "b": Parameter(type="number"),
+            },
             returns=Parameter(type="number"),
         ),
         Function(
@@ -27,8 +30,14 @@ def grammar() -> Grammar:
     return Grammar(functions=functions)
 
 
-def test_generate_picks_function_and_number_parameters(vocabulary, grammar: Grammar) -> None:
-    stop_ids = {vocabulary.get_id(","), vocabulary.get_id("}"), vocabulary.get_id('"')}
+def test_generate_picks_function_and_number_parameters(
+    vocabulary, grammar: Grammar
+) -> None:
+    stop_ids = {
+        vocabulary.get_id(","),
+        vocabulary.get_id("}"),
+        vocabulary.get_id('"'),
+    }
     llm = OracleLLM(
         vocabulary,
         targets={"Function name:": "add", '"a": ': "4", '"b": ': "2"},
@@ -43,8 +52,14 @@ def test_generate_picks_function_and_number_parameters(vocabulary, grammar: Gram
     assert result.parameters == {"a": 4.0, "b": 2.0}
 
 
-def test_generate_picks_function_and_string_parameter(vocabulary, grammar: Grammar) -> None:
-    stop_ids = {vocabulary.get_id(","), vocabulary.get_id("}"), vocabulary.get_id('"')}
+def test_generate_picks_function_and_string_parameter(
+    vocabulary, grammar: Grammar
+) -> None:
+    stop_ids = {
+        vocabulary.get_id(","),
+        vocabulary.get_id("}"),
+        vocabulary.get_id('"'),
+    }
     llm = OracleLLM(
         vocabulary,
         targets={"Function name:": "greet", '"name": "': "bob"},

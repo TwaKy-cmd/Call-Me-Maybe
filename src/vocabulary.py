@@ -41,7 +41,9 @@ class NumberState(Enum):
     FRAC_DIGITS = auto()
 
 
-_ACCEPTING_NUMBER_STATES = frozenset({NumberState.INT_DIGITS, NumberState.FRAC_DIGITS})
+_ACCEPTING_NUMBER_STATES = frozenset(
+    {NumberState.INT_DIGITS, NumberState.FRAC_DIGITS}
+)
 
 
 def _byte_decoder() -> dict[str, int]:
@@ -75,7 +77,7 @@ _BYTE_DECODER = _byte_decoder()
 
 
 def _number_transition(state: NumberState, char: str) -> NumberState | None:
-    """Single-character transition of the JSON-number DFA, or None if invalid."""
+    """Single-character transition of the JSON-number DFA, or None."""
     if state is NumberState.START:
         if char == "-":
             return NumberState.AFTER_SIGN
@@ -97,7 +99,8 @@ NumberMask = tuple[frozenset[int], dict[int, NumberState]]
 
 
 class Vocabulary:
-    """Maps token text <-> token id and precomputes constrained-decoding masks."""
+    """Maps token text <-> token id and precomputes constrained-decoding
+    masks."""
 
     def __init__(self, vocab_path: str) -> None:
         """Load the vocabulary file and build every grammar mask once.
@@ -114,18 +117,26 @@ class Vocabulary:
             with open(vocab_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except OSError as e:
-            raise OSError(f"Could not read vocabulary file '{vocab_path}': {e}") from e
+            raise OSError(
+                f"Could not read vocabulary file '{vocab_path}': {e}"
+            ) from e
         except json.JSONDecodeError as e:
-            raise ValueError(f"Vocabulary file '{vocab_path}' is not valid JSON: {e}") from e
+            raise ValueError(
+                f"Vocabulary file '{vocab_path}' is not valid JSON: {e}"
+            ) from e
 
         try:
             data = _VOCAB_ADAPTER.validate_python(data)
         except PydanticValidationError as e:
             raise ValueError(
-                f"Vocabulary file '{vocab_path}' must map token strings to integer ids: {e}"
+                f"Vocabulary file '{vocab_path}' must map token strings "
+                f"to integer ids: {e}"
             ) from e
         if not data:
-            raise ValueError(f"Vocabulary file '{vocab_path}' must contain a non-empty object")
+            raise ValueError(
+                f"Vocabulary file '{vocab_path}' must contain a "
+                "non-empty object"
+            )
 
         #: Raw file contents, i.e. still in the byte-level BPE alphabet.
         self.text_to_id: dict[str, int] = data
@@ -134,14 +145,19 @@ class Vocabulary:
         #: The bytes each token actually stands for, once the byte-level
         #: BPE placeholders have been resolved.
         self.id_to_bytes: dict[int, bytes] = {
-            token_id: self._decode_token(text) for text, token_id in data.items()
+            token_id: self._decode_token(text)
+            for text, token_id in data.items()
         }
         self._bytes_to_id: dict[bytes, int] = {}
         for token_id, raw in self.id_to_bytes.items():
             self._bytes_to_id.setdefault(raw, token_id)
 
-        self.string_content_ids: frozenset[int] = self._build_string_content_ids()
-        self._number_masks: dict[NumberState, NumberMask] = self._build_number_masks()
+        self.string_content_ids: frozenset[int] = (
+            self._build_string_content_ids()
+        )
+        self._number_masks: dict[NumberState, NumberMask] = (
+            self._build_number_masks()
+        )
         self._prefix_cache: dict[bytes, frozenset[int]] = {}
 
     def ids_starting_with(self, text: str) -> frozenset[int]:
@@ -159,7 +175,9 @@ class Vocabulary:
         cached = self._prefix_cache.get(raw)
         if cached is None:
             cached = frozenset(
-                token_id for token_id, value in self.id_to_bytes.items() if value.startswith(raw)
+                token_id
+                for token_id, value in self.id_to_bytes.items()
+                if value.startswith(raw)
             )
             self._prefix_cache[raw] = cached
         return cached
@@ -204,7 +222,8 @@ class Vocabulary:
             for token_id, raw in self.id_to_bytes.items()
             if raw
             and all(
-                byte >= _FIRST_PRINTABLE_BYTE and byte not in (_QUOTE_BYTE, _BACKSLASH_BYTE)
+                byte >= _FIRST_PRINTABLE_BYTE
+                and byte not in (_QUOTE_BYTE, _BACKSLASH_BYTE)
                 for byte in raw
             )
         )
@@ -234,10 +253,11 @@ class Vocabulary:
         return masks
 
     def number_mask(self, state: NumberState) -> NumberMask:
-        """Return (allowed token ids, resulting end state) to extend a number in `state`."""
+        """Return (allowed ids, resulting end state) to extend a number
+        in `state`."""
         return self._number_masks[state]
 
     @staticmethod
     def is_accepting_number_state(state: NumberState) -> bool:
-        """Whether `state` already forms a syntactically complete JSON number."""
+        """Whether `state` already forms a complete JSON number."""
         return state in _ACCEPTING_NUMBER_STATES

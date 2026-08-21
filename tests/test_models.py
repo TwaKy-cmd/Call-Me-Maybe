@@ -19,7 +19,11 @@ def test_function_parses_valid_definition() -> None:
 
 
 def test_function_missing_field_raises() -> None:
-    data = {"name": "fn_add_numbers", "parameters": {}, "returns": {"type": "number"}}
+    data = {
+        "name": "fn_add_numbers",
+        "parameters": {},
+        "returns": {"type": "number"},
+    }
     with pytest.raises(ValidationError):
         Function.model_validate(data)
 

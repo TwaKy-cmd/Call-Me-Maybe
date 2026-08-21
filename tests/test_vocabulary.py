@@ -52,7 +52,9 @@ def byte_level_vocabulary(tmp_path) -> Vocabulary:
     return Vocabulary(str(path))
 
 
-def test_byte_level_tokens_decode_to_real_text(byte_level_vocabulary: Vocabulary) -> None:
+def test_byte_level_tokens_decode_to_real_text(
+    byte_level_vocabulary: Vocabulary,
+) -> None:
     assert byte_level_vocabulary.get_text(0) == " shrek"
     assert byte_level_vocabulary.get_text(1) == "\n"
     assert byte_level_vocabulary.get_id(" shrek") == 0
@@ -76,14 +78,18 @@ def test_byte_level_newline_is_not_valid_string_content(
     assert 4 in content_ids
 
 
-def test_string_content_ids_excludes_forbidden_characters(vocabulary: Vocabulary) -> None:
+def test_string_content_ids_excludes_forbidden_characters(
+    vocabulary: Vocabulary,
+) -> None:
     quote_id = vocabulary.get_id('"')
     letter_id = vocabulary.get_id("a")
     assert quote_id not in vocabulary.string_content_ids
     assert letter_id in vocabulary.string_content_ids
 
 
-def test_number_mask_start_allows_digit_and_minus(vocabulary: Vocabulary) -> None:
+def test_number_mask_start_allows_digit_and_minus(
+    vocabulary: Vocabulary,
+) -> None:
     allowed, end_states = vocabulary.number_mask(NumberState.START)
     digit_id = vocabulary.get_id("4")
     minus_id = vocabulary.get_id("-")
@@ -96,7 +102,9 @@ def test_number_mask_start_allows_digit_and_minus(vocabulary: Vocabulary) -> Non
     assert letter_id not in allowed
 
 
-def test_number_mask_after_sign_only_allows_digit(vocabulary: Vocabulary) -> None:
+def test_number_mask_after_sign_only_allows_digit(
+    vocabulary: Vocabulary,
+) -> None:
     allowed, end_states = vocabulary.number_mask(NumberState.AFTER_SIGN)
     assert vocabulary.get_id("-") not in allowed
     digit_id = vocabulary.get_id("7")
@@ -104,7 +112,9 @@ def test_number_mask_after_sign_only_allows_digit(vocabulary: Vocabulary) -> Non
     assert end_states[digit_id] is NumberState.INT_DIGITS
 
 
-def test_number_mask_int_digits_allows_digit_and_dot(vocabulary: Vocabulary) -> None:
+def test_number_mask_int_digits_allows_digit_and_dot(
+    vocabulary: Vocabulary,
+) -> None:
     allowed, end_states = vocabulary.number_mask(NumberState.INT_DIGITS)
     dot_id = vocabulary.get_id(".")
     digit_id = vocabulary.get_id("9")
